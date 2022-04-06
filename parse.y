@@ -8,15 +8,18 @@ void yyerror(char * s);
 
 FILE *outfile;
 char *CommentBuffer;
+Variables_t storage_db;
+
  
 %}
 
 %union {tokentype token;
         regInfo targetReg;
+        Type_Expression dataType;
        }
 
 %token PROG PERIOD VAR 
-%token INT BOOL PRT THEN IF DO FI ENDWHILE ENDFOR
+%token <dataType> INT BOOL PRT THEN IF DO FI ENDWHILE ENDFOR
 %token ARRAY OF 
 %token BEG END ASG  
 %token EQ NEQ LT LEQ GT GEQ AND OR TRUE FALSE
@@ -38,10 +41,10 @@ char *CommentBuffer;
 %%
 program : {emitComment("Assign STATIC_AREA_ADDRESS to register \"r0\"");
            emit(NOLABEL, LOADI, STATIC_AREA_ADDRESS, 0, EMPTY);} 
-           PROG ID ';' block PERIOD { }
+           PROG ID ';' block PERIOD {  }
 	;
 
-block	: variables cmpdstmt { }
+block	: variables cmpdstmt {  }
 	;
 
 variables: /* empty */
@@ -53,11 +56,18 @@ vardcls	: vardcls vardcl ';' { }
 	| error ';' { yyerror("***Error: illegal variable declaration\n");}  
 	;
 
-vardcl	: idlist ':' type {  }
+vardcl	: idlist ':' type { 
+
+      for(int i = 0; i < storage_db.iterator; i++){
+        /*I'm not totally sure about the offset being zero, but we'll see
+         * insert( name, Type_Expression, offset)*/
+        insert(storage_db.vars[i], storage_db.dataType, 0);
+      } 
+    }
 	;
 
-idlist	: idlist ',' ID {  }
-        | ID		{  } 
+idlist	: idlist ',' ID { storage_db.vars[storage_db.iterator++]=$3.str; }
+        | ID		{ storage_db.vars[storage_db.iterator++]=$1.str; } 
 	;
 
 
@@ -66,8 +76,8 @@ type	: ARRAY '[' ICONST ']' OF stype {  }
         | stype {  }
 	;
 
-stype	: INT {  }
-        | BOOL {  }
+stype	: INT { storage_db.dataType = TYPE_INT; }
+        | BOOL { storage_db.dataType = TYPE_BOOL }
 	;
 
 stmtlist : stmtlist ';' stmt { }
@@ -133,23 +143,22 @@ astmt : lhs ASG exp             {
 	;
 
 lhs	: ID			{ /* BOGUS  - needs to be fixed */
-                                  int newReg1 = NextRegister();
-                                  int newReg2 = NextRegister();
-                                  int offset = NextOffset(4);
-				  
-                                  $$.targetRegister = newReg2;
-                                  $$.type = TYPE_INT;
 
-				  insert($1.str, TYPE_INT, offset);
-				   
-				  emit(NOLABEL, LOADI, offset, newReg1, EMPTY);
-				  emit(NOLABEL, ADD, 0, newReg1, newReg2);
-				  
-                         	  }
+                int newReg1 = NextRegister();
+                int newReg2 = NextRegister();
+                int offset = NextOffset(4);
 
+                $$.targetRegister = newReg2;
+                $$.type = TYPE_INT;
 
-                                |  ID '[' exp ']' {   }
-                                ;
+      				  insert($1.str, TYPE_INT, offset);
+      				   
+      				  emit(NOLABEL, LOADI, offset, newReg1, EMPTY);
+      				  emit(NOLABEL, ADD, 0, newReg1, newReg2);
+
+       	      }
+                |  ID '[' exp ']' {   }
+                ;
 
 
 exp	: exp '+' exp		{ int newReg = NextRegister();
@@ -248,6 +257,9 @@ main(int argc, char* argv[]) {
 
   CommentBuffer = (char *) malloc(1961);  
   InitSymbolTable();
+  storage_db.vars = malloc(200);
+  storage_db.iterator = 0;
+  
 
   printf("1\t");
   yyparse();

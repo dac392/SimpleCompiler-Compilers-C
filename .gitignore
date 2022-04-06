@@ -1,1 +1,8 @@
 sol-codegen
+codegen
+iloc.out
+*.o
+lex.yy.c
+parse.output
+parse.tab.c
+parse.tab.h

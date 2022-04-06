@@ -16,6 +16,13 @@ typedef struct {
         int targetRegister;
         } regInfo;
 
+typedef struct{
+	Type_Expression dataType;	//TYPE_INT | TYPE_BOOL
+	int iterator;
+	char **vars;
+
+}Variables_t;
+
 #endif
 
 
