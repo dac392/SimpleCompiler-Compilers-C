@@ -1,5 +1,6 @@
 %{
 #include <stdio.h>
+#include <string.h>
 #include "attr.h"
 #include "instrutil.h"
 int yylex();
@@ -9,7 +10,8 @@ void yyerror(char * s);
 FILE *outfile;
 char *CommentBuffer;
 Variables_t storage_db;
-
+SymTabEntry *synch;
+SymTabEntry *synch_id;
  
 %}
 
@@ -61,8 +63,9 @@ vardcl	: idlist ':' type {
       for(int i = 0; i < storage_db.iterator; i++){
         /*I'm not totally sure about the offset being zero, but we'll see
          * insert( name, Type_Expression, offset)*/
-        insert(storage_db.vars[i], storage_db.dataType, 0);
+        insert(storage_db.vars[i], storage_db.dataType, -1);
       } 
+      storage_db.holding = False;
     }
 	;
 
@@ -107,16 +110,22 @@ ifstmt :  ifhead
 ifhead : IF condexp {  }
         ;
 
-writestmt: PRT '(' exp ')' { int printOffset = -4; /* default location for printing */
-  	                         sprintf(CommentBuffer, "Code for \"PRINT\" from offset %d", printOffset);
-	                         emitComment(CommentBuffer);
-                                 emit(NOLABEL, STOREAI, $3.targetRegister, 0, printOffset);
-                                 emit(NOLABEL, 
-                                      OUTPUTAI, 
-                                      0,
-                                      printOffset, 
-                                      EMPTY);
-                               }
+writestmt: PRT '(' exp ')' { 
+
+			int printOffset = -4; /* default location for printing */
+			//synch = lookup($3.name)
+			//sprintf(CommentBuffer, "what is this: %s, %d", getRegister1(synch), getOffset(synch));
+         	//emitComment(CommentBuffer);
+
+            sprintf(CommentBuffer, "Code for \"PRINT\" from offset %d", printOffset);
+         	emitComment(CommentBuffer);
+            emit(NOLABEL, STOREAI, $3.targetRegister, 0, printOffset);
+            emit(NOLABEL, 
+                  OUTPUTAI, 
+                  0,
+                  printOffset, 
+                  EMPTY);
+           }
 	;
 
 fstmt	: FOR ctrlexp DO stmt { }
@@ -128,57 +137,94 @@ wstmt	: WHILE condexp DO stmt { }
         ;
   
 
-astmt : lhs ASG exp             { 
+astmt : lhs ASG exp  /*figure this out*/          { 
  				  if (! ((($1.type == TYPE_INT) && ($3.type == TYPE_INT)) || 
 				         (($1.type == TYPE_BOOL) && ($3.type == TYPE_BOOL)))) {
 				    printf("*** ERROR ***: Assignment types do not match.\n");
 				  }
-
-				  emit(NOLABEL,
-                                       STORE, 
-                                       $3.targetRegister,
-                                       $1.targetRegister,
-                                       EMPTY);
+          			emit(NOLABEL, STORE, $3.targetRegister, $1.targetRegister, EMPTY);
                                 }
 	;
 
-lhs	: ID			{ /* BOGUS  - needs to be fixed */
-
-                int newReg1 = NextRegister();
-                int newReg2 = NextRegister();
-                int offset = NextOffset(4);
-
-                $$.targetRegister = newReg2;
-                $$.type = TYPE_INT;
-
-      				  insert($1.str, TYPE_INT, offset);
-      				   
-      				  emit(NOLABEL, LOADI, offset, newReg1, EMPTY);
-      				  emit(NOLABEL, ADD, 0, newReg1, newReg2);
-
+lhs	: ID{ /* DONE? */
+                synch_id = lookup($1.str);
+                sprintf(CommentBuffer, "Trying to lhs: %s", synch_id->name);
+                emitComment(CommentBuffer);
+                if(synch_id->offset == -1){
+                  int offsetRegister = NextRegister();
+                  synch_id->reg1 = NextRegister();
+                  synch_id->offset = NextOffset(1);
+                  emit(NOLABEL, LOADI, getOffset(synch_id), offsetRegister, EMPTY);
+                  emit(NOLABEL, ADD, BASE, offsetRegister, getRegister1(synch_id));
+                  $$.targetRegister = getRegister1(synch_id);
+                }else{
+                	int prev = NextRegister();
+                	emit(NOLABEL, LOADI, getOffset(synch_id), prev, EMPTY);
+                	int offsetRegister = NextRegister();
+                	emit(NOLABEL, ADD, 0, prev, offsetRegister);
+                	//synch_id->reg1 = offsetRegister;
+                	$$.targetRegister = offsetRegister;
+                }
+                
+                $$.type = synch_id->type;
        	      }
                 |  ID '[' exp ']' {   }
                 ;
 
 
-exp	: exp '+' exp		{ int newReg = NextRegister();
+exp	: exp '+' exp		{ 
+                      if (! (($1.type == TYPE_INT) && ($3.type == TYPE_INT))) {
+    				            printf("*** ERROR ***: Operator types must be integer.\n");
+                      }
 
-                                  if (! (($1.type == TYPE_INT) && ($3.type == TYPE_INT))) {
-    				    printf("*** ERROR ***: Operator types must be integer.\n");
-                                  }
-                                  $$.type = $1.type;
+                        synch = lookup(storage_db.hold1);
+                        sprintf(CommentBuffer, "what is this %s , %d", synch->name, getRegister1(synch));
+                		emitComment(CommentBuffer);
 
-                                  $$.targetRegister = newReg;
-                                  emit(NOLABEL, 
-                                       ADD, 
-                                       $1.targetRegister, 
-                                       $3.targetRegister, 
-                                       newReg);
-                                }
+                		int target = NextRegister();
+                        $$.type = getType(synch_id);
+                        $$.targetRegister = target;
+                        
+                        emit(NOLABEL, ADD, $1.targetRegister, $3.targetRegister, $$.targetRegister);
+                        storage_db.holding = False;
+                        
+                    }
 
-        | exp '-' exp		{  }
+        | exp '-' exp		{ 
+                      /* WARNING: this was just copy pased from add. Don't trust without testing */
+                      if (! (($1.type == TYPE_INT) && ($3.type == TYPE_INT))) {
+                        printf("*** ERROR ***: Operator types must be integer.\n");
+                      }
+                        synch = lookup(storage_db.hold1);
+                        int val1 = getInt(synch);
+                        synch = lookup(storage_db.hold2);
+                        int val2 = getInt(synch);
+                        setInt(synch_id, val1-val2);
+                        $$.type = getType(synch_id);
+                        $$.targetRegister = getRegister1(synch_id);
+                        
+                        emit(NOLABEL, SUB, $1.targetRegister, $3.targetRegister, $$.targetRegister);
+                        storage_db.holding = False;
+                        
+         }
 
-        | exp '*' exp		{  }
+        | exp '*' exp		{ 
+                      /* WARNING: this was just copy pased from add. Don't trust without testing */
+                      if (! (($1.type == TYPE_INT) && ($3.type == TYPE_INT))) {
+                        printf("*** ERROR ***: Operator types must be integer.\n");
+                      }
+                        synch = lookup(storage_db.hold1);
+                        int val1 = getInt(synch);
+                        synch = lookup(storage_db.hold2);
+                        int val2 = getInt(synch);
+                        setInt(synch_id, val1*val2);
+                        $$.type = getType(synch_id);
+                        $$.targetRegister = getRegister1(synch_id);
+                        
+                        emit(NOLABEL, MULT, $1.targetRegister, $3.targetRegister, $$.targetRegister);
+                        storage_db.holding = False;
+                        
+         }
 
         | exp AND exp		{  } 
 
@@ -186,34 +232,46 @@ exp	: exp '+' exp		{ int newReg = NextRegister();
         | exp OR exp       	{  }
 
 
-        | ID			{ /* BOGUS  - needs to be fixed */
-	                          int newReg = NextRegister();
-                                  int offset = NextOffset(4);
+        | ID { /* BOGUS  - needs to be fixed */
 
-	                          $$.targetRegister = newReg;
-				  $$.type = TYPE_INT;
-				  emit(NOLABEL, LOADAI, 0, offset, newReg);
-                                  
-	                        }
+                    (storage_db.holding)? stringCopy($1.str, storage_db.hold2) : stringCopy($1.str, storage_db.hold1);
+                    
+                    synch = lookup(storage_db.hold1);//$1.str
+                	int first_expression = NextRegister();
+                	$1.num = first_expression;
+                	emit(NOLABEL, LOADAI, 0, getOffset(synch), first_expression);
+                	//synch->reg1 = first_expression;
+                    $$.targetRegister = first_expression;
+                    $$.type = getType(synch);
+                    storage_db.holding = True;
+                  }
 
         | ID '[' exp ']'	{   }
  
 
 
-	| ICONST                 { int newReg = NextRegister();
-	                           $$.targetRegister = newReg;
-				   $$.type = TYPE_INT;
-				   emit(NOLABEL, LOADI, $1.num, newReg, EMPTY); }
+	| ICONST { 
 
-        | TRUE                   { int newReg = NextRegister(); /* TRUE is encoded as value '1' */
-	                           $$.targetRegister = newReg;
-				   $$.type = TYPE_BOOL;
-				   emit(NOLABEL, LOADI, 1, newReg, EMPTY); }
+              if(isInt(synch_id)){
+                $$.targetRegister = NextRegister();
+                $$.type = TYPE_INT;
+                setInt(synch_id, $1.num);
+                emit(NOLABEL, LOADI, getInt(synch_id), $$.targetRegister, EMPTY);
+              }
 
-        | FALSE                   { int newReg = NextRegister(); /* TRUE is encoded as value '0' */
-	                           $$.targetRegister = newReg;
-				   $$.type = TYPE_BOOL;
-				   emit(NOLABEL, LOADI, 0, newReg, EMPTY); }
+           }
+
+        | TRUE                   { 
+          int newReg = NextRegister(); /* TRUE is encoded as value '1' */
+          $$.targetRegister = newReg;
+				  $$.type = TYPE_BOOL;
+				  emit(NOLABEL, LOADI, 1, newReg, EMPTY); }
+
+        | FALSE                   { 
+          int newReg = NextRegister(); /* TRUE is encoded as value '0' */
+          $$.targetRegister = newReg;
+          $$.type = TYPE_BOOL;
+          emit(NOLABEL, LOADI, 0, newReg, EMPTY); }
 
 	| error { yyerror("***Error: illegal expression\n");}  
 	;
@@ -257,8 +315,12 @@ main(int argc, char* argv[]) {
 
   CommentBuffer = (char *) malloc(1961);  
   InitSymbolTable();
-  storage_db.vars = malloc(200);
+
+  /* bro you hve to fix this at some point*/
+  storage_db.vars = malloc(sizeof(char*)*200);
   storage_db.iterator = 0;
+  storage_db.hold1 = (char *) malloc(60);
+  storage_db.hold2 = (char *) malloc(60);
   
 
   printf("1\t");
