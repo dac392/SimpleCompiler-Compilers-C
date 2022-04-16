@@ -21,10 +21,7 @@
 typedef struct { /* need to augment this */
   char *name;
   int offset;
-  int reg1;
-  int val_int;
-  Boolean val_bool;
-  Type_Expression type; 
+  Type_Expression type;  
 } SymTabEntry;
 
 extern
@@ -38,16 +35,6 @@ void insert(char *name, Type_Expression type, int offset);
 
 extern
 void PrintSymbolTable();
-
-/* Helper functions */
-Boolean isInt(SymTabEntry* entry);
-int getInt(SymTabEntry* entry);
-Boolean getBool(SymTabEntry* entry);
-Type_Expression getType(SymTabEntry* entry);
-int getRegister1(SymTabEntry* entry);
-int getOffset(SymTabEntry* entry);
-void setInt(SymTabEntry* entry, int val_int);
-void setBool(SymTabEntry* entry, Boolean val_bool);
 
 
 #endif

@@ -6,9 +6,9 @@
 
 #ifndef ATTR_H
 #define ATTR_H
-#define BASE 0
+
 typedef union {int num; char *str;} tokentype;
-typedef enum boolean {False = 0, True = 1} Boolean;
+
 typedef enum type_expression {TYPE_INT=0, TYPE_BOOL, TYPE_ERROR} Type_Expression;
 
 typedef struct {
@@ -16,18 +16,19 @@ typedef struct {
         int targetRegister;
 } regInfo;
 
-typedef struct{
-	Type_Expression dataType;	//TYPE_INT | TYPE_BOOL
+/* -----declarations_t----- */
+typedef struct
+{
+	char**variable_buffer;
 	int iterator;
-	char **vars;
-	char *hold1;				//used for holding variable name
-	char *hold2;				//used for holding variable name
-	Boolean holding;
 
-}Variables_t;
+}declarations_t;
+void init_declarations(declarations_t*obj);
+void reset_declarations(declarations_t*obj);
+void addVariable(declarations_t*obj, char*a);
+void destroy(declarations_t*obj);
 
-/* Function definitions */
-void stringCopy(char*src, char*dest);
+
 #endif
 
 

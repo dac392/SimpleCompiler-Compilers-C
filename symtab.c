@@ -9,54 +9,6 @@
 #include <string.h>
 #include "symtab.h"
 
-/*
- * SymTabEntry int/Boolean functions
-*/
-Boolean isInt(SymTabEntry* entry){
-	if(entry->type == TYPE_INT){
-		return True;
-	}
-	return False;
-}
-	/* getters */
-int getRegister1(SymTabEntry* entry){
-	return entry->reg1;
-}
-int getInt(SymTabEntry* entry){
-	return entry->val_int;
-}
-Type_Expression getType(SymTabEntry* entry){
-	return entry->type;
-}
-Boolean getBool(SymTabEntry* entry){
-	return entry->val_bool;
-}
-int getOffset(SymTabEntry* entry){
-	return entry->offset;
-}
-
-	/* setters */
-void setInt(SymTabEntry* entry, int val_int){
-	entry->val_int = val_int;
-}
-void setBool(SymTabEntry* entry, Boolean val_bool){
-	entry->val_bool = val_bool;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*  --- Static VARIABLES AND FUNCTIONS --- */
 static 
 SymTabEntry **HashTable;
