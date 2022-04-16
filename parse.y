@@ -15,6 +15,7 @@ SymTabEntry * assignment_entry;
 
 %union {tokentype token;
         regInfo targetReg;
+        state_t state_machine;
        }
 
 %token PROG PERIOD VAR 
@@ -27,6 +28,7 @@ SymTabEntry * assignment_entry;
 
 %type <targetReg> exp 
 %type <targetReg> lhs 
+%type <state_machine> ctrlexp
 
 %start program
 
@@ -38,9 +40,10 @@ SymTabEntry * assignment_entry;
 %nonassoc ELSE
 
 %%
-program : {emitComment("Assign STATIC_AREA_ADDRESS to register \"r0\"");
-           emit(NOLABEL, LOADI, STATIC_AREA_ADDRESS, 0, EMPTY);} 
-           PROG ID ';' block PERIOD { }
+program : {
+          emitComment("Assign STATIC_AREA_ADDRESS to register \"r0\"");
+          emit(NOLABEL, LOADI, STATIC_AREA_ADDRESS, 0, EMPTY);} 
+          PROG ID ';' block PERIOD { }
 	;
 
 block	: variables cmpdstmt { }
@@ -107,19 +110,24 @@ ifstmt :  ifhead
 ifhead : IF condexp {  }
         ;
 
-writestmt: PRT '(' exp ')' { int printOffset = -4; /* default location for printing */
-  	                         sprintf(CommentBuffer, "Code for \"PRINT\" from offset %d", printOffset);
-	                         emitComment(CommentBuffer);
-                                 emit(NOLABEL, STOREAI, $3.targetRegister, 0, printOffset);
-                                 emit(NOLABEL, 
-                                      OUTPUTAI, 
-                                      0,
-                                      printOffset, 
-                                      EMPTY);
-                               }
+writestmt: PRT '(' exp ')' { 
+       int printOffset = -4; /* default location for printing */
+       sprintf(CommentBuffer, "Code for \"PRINT\" from offset %d", printOffset);
+       emitComment(CommentBuffer);
+       emit(NOLABEL, STOREAI, $3.targetRegister, 0, printOffset);
+       emit(NOLABEL, OUTPUTAI, 0,printOffset, EMPTY);
+     }
 	;
 
-fstmt	: FOR ctrlexp DO stmt { }
+fstmt	: FOR ctrlexp DO stmt { 
+        int newReg1 = NextRegister();
+        int newReg2 = NextRegister();
+        emit(NOLABEL, LOADAI, 0, $2.offset, newReg1);
+        emit(NOLABEL, ADDI, newReg1, 1, newReg2);
+        emit(NOLABEL, STOREAI, newReg2, 0, $2.offset);
+        emit(NOLABEL, BR, $2.control_label, EMPTY, EMPTY);
+        emit($2.break_label, NOP, EMPTY,EMPTY,EMPTY);
+}
           ENDFOR
 	;
 
@@ -138,7 +146,7 @@ astmt : lhs ASG exp             {
                                 }
 	;
 
-lhs	: ID	{ /* BOGUS  - needs to be fixed */
+lhs	: ID	{
 
           assignment_entry = lookup($1.str);
           int newReg1 = NextRegister();
@@ -150,6 +158,10 @@ lhs	: ID	{ /* BOGUS  - needs to be fixed */
 
           $$.targetRegister = newReg2;
           $$.type = assignment_entry->type;
+
+          sprintf(CommentBuffer, "Compute address of variable \"%s\" at offset %d in register r%d", $1.str, assignment_entry->offset, newReg2);
+          emitComment(CommentBuffer);
+
 				  emit(NOLABEL, LOADI, assignment_entry->offset, newReg1, EMPTY);
 				  emit(NOLABEL, ADD, 0, newReg1, newReg2);
 				  
@@ -164,11 +176,13 @@ exp	: exp '+' exp		{
           if (! (($1.type == TYPE_INT) && ($3.type == TYPE_INT))) {
             printf("*** ERROR ***: Operator types must be integer.\n");
           }
-
           int newReg = NextRegister();
           $$.type = $1.type;
           $$.targetRegister = newReg;
           emit(NOLABEL, ADD, $1.targetRegister, $3.targetRegister, newReg);
+          
+
+          
         }
 
         | exp '-' exp		{  
@@ -203,11 +217,14 @@ exp	: exp '+' exp		{
 
 
         | ID{
-          SymTabEntry* table_entry = lookup($1.str);
-          int newReg = NextRegister();
-          $1.num = newReg;
-          $$.targetRegister = newReg;
-          $$.type = table_entry->type;
+          SymTabEntry* table_entry  = lookup($1.str);
+          int newReg                = NextRegister();
+          //$1.num                    = newReg;
+          $$.targetRegister         = newReg;
+          $$.type                   = table_entry->type;
+          //$$.var_type               = TYPE_ID;
+            sprintf(CommentBuffer, "Load RHS value of variable \"%s\" at offset %d", table_entry->name, table_entry->offset);
+            emitComment(CommentBuffer);
           emit(NOLABEL, LOADAI, 0, table_entry->offset, newReg);
                                   
         }
@@ -218,11 +235,11 @@ exp	: exp '+' exp		{
 
 	| ICONST { 
 
-            int newReg = NextRegister();
+            int newReg        = NextRegister();
             $$.targetRegister = newReg;
-            $$.type = TYPE_INT;
-            //sprintf(CommentBuffer, "Compute address of variable \"%s\" at offset %d in register %d", assignment_entry->name, assignment_entry->offset, newReg);
-            //emitComment(CommentBuffer);
+            $$.type           = TYPE_INT;
+            //$$.var_type       = TYPE_CONST;
+            //$$.constant       = $1.num;
             emit(NOLABEL, LOADI, $1.num, newReg, EMPTY);
 
         }
@@ -245,6 +262,39 @@ ctrlexp	: ID ASG ICONST ',' ICONST {
       if(assignment_entry->offset == -1){
         assignment_entry->offset = NextOffset(1);
       }
+      int newReg1 = NextRegister();
+      int newReg2 = NextRegister();
+      int newReg3 = NextRegister();
+      int newReg4 = NextRegister();
+      int newReg5 = NextRegister(); //r11
+      int newReg6 = NextRegister(); //r12
+
+      $$.name     = assignment_entry->name;
+      $$.offset   = assignment_entry->offset;
+      $$.type     = TYPE_FOR;
+      $$.iterator = $3.num;
+      $$.target   = $5.num;
+
+      $$.load_register        = newReg3;
+      $$.expression_register  = newReg4;
+      $$.control_label        = NextLabel();
+      $$.loop_label           = NextLabel();
+      $$.break_label          = NextLabel();
+
+      sprintf(CommentBuffer, "Initialize ind. variable \"%s\" at offset %d with lower bound value %d", $$.name, $$.offset, $$.iterator);
+      emitComment(CommentBuffer);
+      emit(NOLABEL, LOADI, assignment_entry->offset, newReg1, EMPTY);
+      emit(NOLABEL, ADD, 0, newReg1, newReg2);
+      emit(NOLABEL, LOADI, $$.iterator, newReg5, EMPTY);
+      emit(NOLABEL, LOADI, $$.target, newReg6, EMPTY);
+      emit(NOLABEL, STORE, newReg5, newReg2, EMPTY);
+
+      sprintf(CommentBuffer, "Generate control code for \"FOR\"");
+      emitComment(CommentBuffer);
+      emit($$.control_label, LOADAI, 0, $$.offset, $$.load_register);
+      emit(NOLABEL, CMPLE, $$.load_register, $$.target, $$.expression_register);
+      emit(NOLABEL, CBR, $$.expression_register, $$.loop_label, $$.break_label);
+      emit($$.loop_label, NOP, EMPTY, EMPTY, EMPTY);  
       
 }
         ;
