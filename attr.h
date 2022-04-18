@@ -40,9 +40,9 @@ typedef struct
 	int target;
 	int load_register;
 	int expression_register;
-	int control_label;
-	int loop_label;
-	int break_label;
+	int label_one;
+	int label_two;
+	int label_three;
 	/*symtab info*/
 	char* name;
 	int offset;
