@@ -48,6 +48,15 @@ typedef struct
 	int offset;
 }state_t;
 
+typedef struct{
+	Type_Expression type;
+	int is_array;
+	int array_size;
+}Type_t;
+
+typedef struct{
+	int label_1;
+}label_t;
 
 #endif
 

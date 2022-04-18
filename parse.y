@@ -16,6 +16,8 @@ SymTabEntry * assignment_entry;
 %union {tokentype token;
         regInfo targetReg;
         state_t state_machine;
+        Type_t type_cast;
+        label_t label;
        }
 
 %token PROG PERIOD VAR 
@@ -24,10 +26,13 @@ SymTabEntry * assignment_entry;
 %token BEG END ASG  
 %token EQ NEQ LT LEQ GT GEQ AND OR TRUE FALSE
 %token WHILE FOR ELSE 
-%token <token> ID ICONST 
+%token <token> ID ICONST
+
 
 %type <targetReg> exp 
-%type <targetReg> lhs 
+%type <targetReg> lhs
+%type <type_cast> stype type
+%type <label> wstmt 
 %type <state_machine> ctrlexp condexp ifhead
 
 %start program
@@ -56,10 +61,17 @@ variables: /* empty */
 
 vardcls	: vardcls vardcl ';' { }
 	| vardcl ';' { }
-	| error ';' { yyerror("***Error: illegal variable declaration\n"); }  
+	| error ';' { /*yyerror("***Error: illegal variable declaration\n")*/; }  
 	;
 
-vardcl	: idlist ':' type {  }
+vardcl	: idlist ':' type { 
+
+          for(int i = 0; i < declaration_db.iterator; i++){
+            int offset = NextOffset($3.array_size);
+            insert(declaration_db.variable_buffer[i], $3.type, offset, $3.array_size);
+          }
+          reset_declarations(&declaration_db); 
+}
 	;
 
 idlist	: idlist ',' ID { addVariable(&declaration_db, $3.str); }
@@ -67,22 +79,24 @@ idlist	: idlist ',' ID { addVariable(&declaration_db, $3.str); }
 	;
 
 
-type	: ARRAY '[' ICONST ']' OF stype { 
-        
-}
+type	: ARRAY '[' ICONST ']' OF stype {
+          $$.type = $6.type;
+          $$.is_array = 1;
+          $$.array_size = $3.num;
+        }
 
-        | stype { reset_declarations(&declaration_db); }
+        | stype {
+          $$.type = $1.type;
+          $$.is_array = 0;
+          $$.array_size = 1;
+        }
 	;
 
 stype	: INT {
-          for(int i = 0; i < declaration_db.iterator; i++){
-            insert(declaration_db.variable_buffer[i], TYPE_INT, -1);
-          }
+          $$.type = TYPE_INT;
         }
         | BOOL { 
-          for(int i = 0; i < declaration_db.iterator; i++){
-            insert(declaration_db.variable_buffer[i], TYPE_BOOL, -1);
-          }
+          $$.type = TYPE_BOOL;
         }
 	;
 
@@ -102,13 +116,13 @@ stmt    : ifstmt { }
 cmpdstmt: BEG stmtlist END { }
 	;
 
-ifstmt :  ifhead 
+ifstmt :  ifhead
           THEN
           stmt 
   	  ELSE {
         sprintf(CommentBuffer, "Branch to statement following the \"else\" statement list");
         emitComment(CommentBuffer);
-        emit(NOLABEL, BR, $1.label_two, EMPTY, EMPTY);
+        emit(NOLABEL, BR, $1.label_three, EMPTY, EMPTY);
         emit($1.label_two, NOP, EMPTY, EMPTY, EMPTY);
       }
           stmt 
@@ -118,7 +132,10 @@ ifstmt :  ifhead
 ifhead : IF condexp {  
           $$.label_one    = $2.label_one; /*I don't think its needed*/
           $$.label_two    = $2.label_two; /*Takes you to else label*/
-          $$.label_three  = $2.label_three;/*Break from if else label*/
+          $$.label_three  = NextLabel(); /*Break from if else label*/
+
+          sprintf(CommentBuffer, "This branch is the \"true\" branch (FIX)"); 
+          emitComment(CommentBuffer); 
 }
         ;
 
@@ -143,8 +160,17 @@ fstmt	: FOR ctrlexp DO stmt {
           ENDFOR
 	;
 
-wstmt	: WHILE condexp DO stmt { }
-          ENDWHILE
+wstmt	: WHILE {
+    $$.label_1 = NextLabel();
+    emit($$.label_1, NOP, EMPTY, EMPTY, EMPTY);
+    sprintf(CommentBuffer, "Control code for \"WHILE DO\"");
+    emitComment(CommentBuffer);
+  } 
+  condexp DO stmt {
+    emit(NOLABEL, BR, $$.label_1, EMPTY, EMPTY);
+    emit($3.label_two, NOP, EMPTY, EMPTY, EMPTY);
+  }
+  ENDWHILE 
         ;
   
 
@@ -180,8 +206,24 @@ lhs	: ID	{
         }
 
 
-                                |  ID '[' exp ']' {   }
-                                ;
+        |  ID '[' exp ']' {
+          assignment_entry = lookup($1.str);
+          sprintf(CommentBuffer, "Compute address of array variable \"%s\" with base address %d", $1.str, assignment_entry->offset);
+          emitComment(CommentBuffer);
+          int newReg1 = NextRegister(); /*answer*/
+          int newReg2 = NextRegister(); /*type size, always 4*/
+          int newReg3 = NextRegister(); 
+          int newReg4 = NextRegister(); /*base address*/
+          int newReg5 = NextRegister(); /*storage*/
+          emit(NOLABEL, LOADI, 4, newReg2, EMPTY);
+          emit(NOLABEL, MULT, newReg1-1, newReg2, newReg3);
+          emit(NOLABEL, LOADI, assignment_entry->offset, newReg4, EMPTY);
+          emit(NOLABEL, ADD, newReg4, newReg3, newReg5);
+          emit(NOLABEL, ADD, 0, newReg5, newReg1);
+          $$.targetRegister = newReg1;
+          $$.type = assignment_entry->type;
+        }
+        ;
 
 
 exp	: exp '+' exp		{ 
@@ -192,8 +234,6 @@ exp	: exp '+' exp		{
           $$.type = $1.type;
           $$.targetRegister = newReg;
           emit(NOLABEL, ADD, $1.targetRegister, $3.targetRegister, newReg);
-          
-
           
         }
 
@@ -231,17 +271,31 @@ exp	: exp '+' exp		{
         | ID{
           SymTabEntry* table_entry  = lookup($1.str);
           int newReg                = NextRegister();
-          //$1.num                    = newReg;
           $$.targetRegister         = newReg;
           $$.type                   = table_entry->type;
-          //$$.var_type               = TYPE_ID;
-            sprintf(CommentBuffer, "Load RHS value of variable \"%s\" at offset %d", table_entry->name, table_entry->offset);
-            emitComment(CommentBuffer);
+          sprintf(CommentBuffer, "Load RHS value of variable \"%s\" at offset %d", table_entry->name, table_entry->offset);
+          emitComment(CommentBuffer);
           emit(NOLABEL, LOADAI, 0, table_entry->offset, newReg);
                                   
         }
 
-        | ID '[' exp ']'	{   }
+        | ID '[' exp ']'	{
+          assignment_entry = lookup($1.str);  /*if something is breaking, concider changin this to not update the global reference*/
+          sprintf(CommentBuffer, "Load RHS value of array variable \"%s\" with base address %d", $1.str, assignment_entry->offset);
+          emitComment(CommentBuffer);
+          int newReg1 = NextRegister(); /*answer*/
+          int newReg2 = NextRegister(); /*type size, always 4*/
+          int newReg3 = NextRegister(); 
+          int newReg4 = NextRegister(); /*base address*/
+          int newReg5 = NextRegister(); /*storage*/
+          emit(NOLABEL, LOADI, 4, newReg2, EMPTY);
+          emit(NOLABEL, MULT, newReg1-1, newReg2, newReg3);
+          emit(NOLABEL, LOADI, assignment_entry->offset, newReg4, EMPTY);
+          emit(NOLABEL, ADD, newReg4, newReg3, newReg5);
+          emit(NOLABEL, LOADAO, 0, newReg5, newReg1);
+          $$.targetRegister = newReg1;
+          $$.type = assignment_entry->type;
+        }
  
 
 
@@ -279,14 +333,14 @@ ctrlexp	: ID ASG ICONST ',' ICONST {
       int newReg3 = NextRegister();
       int newReg4 = NextRegister();
       int newReg5 = NextRegister(); //r11
-      int newReg6 = NextRegister(); //r12
+      int newReg6 = NextRegister(); //r12 target
 
       $$.name     = assignment_entry->name;
       $$.offset   = assignment_entry->offset;
       $$.type     = TYPE_FOR;
       $$.iterator = $3.num;
       $$.target   = $5.num;
-
+      // maybe we should add the target register?
       $$.load_register        = newReg3;
       $$.expression_register  = newReg4;
       $$.label_one            = NextLabel();  /*takes you to control label*/
@@ -304,38 +358,78 @@ ctrlexp	: ID ASG ICONST ',' ICONST {
       sprintf(CommentBuffer, "Generate control code for \"FOR\"");
       emitComment(CommentBuffer);
       emit($$.label_one, LOADAI, 0, $$.offset, $$.load_register);
-      emit(NOLABEL, CMPLE, $$.load_register, $$.target, $$.expression_register);
+      emit(NOLABEL, CMPLE, $$.load_register, newReg6, $$.expression_register);
       emit(NOLABEL, CBR, $$.expression_register, $$.label_two, $$.label_three);
       emit($$.label_two, NOP, EMPTY, EMPTY, EMPTY);  
       
 }
         ;
 
-condexp	: exp NEQ exp		{  } 
+condexp	: exp NEQ exp		{
+          int comparison = NextRegister();
+          int true_label = NextLabel();
+          int else_label = NextLabel();
+          emit(NOLABEL, CMPNE, $1.targetRegister, $3.targetRegister, comparison);
+          emit(NOLABEL, CBR, comparison, true_label, else_label);
+          emit(true_label, NOP, EMPTY, EMPTY, EMPTY);
+          $$.label_one    = true_label;
+          $$.label_two    = else_label;
+        } 
 
-        | exp EQ exp		{  } 
+        | exp EQ exp		{
+          int comparison = NextRegister();
+          int true_label = NextLabel();
+          int else_label = NextLabel();
+          emit(NOLABEL, CMPEQ, $1.targetRegister, $3.targetRegister, comparison);
+          emit(NOLABEL, CBR, comparison, true_label, else_label);
+          emit(true_label, NOP, EMPTY, EMPTY, EMPTY);
+          $$.label_one    = true_label;
+          $$.label_two    = else_label;
+        } 
 
         | exp LT exp		{
           int comparison = NextRegister();
           int true_label = NextLabel();
           int else_label = NextLabel();
-          int break_label= NextLabel();
+          emit(NOLABEL, CMPLT, $1.targetRegister, $3.targetRegister, comparison);
+          emit(NOLABEL, CBR, comparison, true_label, else_label);
+          emit(true_label, NOP, EMPTY, EMPTY, EMPTY);
+          $$.label_one    = true_label;
+          $$.label_two    = else_label;
+        }
+
+        | exp LEQ exp		{
+          int comparison = NextRegister();
+          int true_label = NextLabel();
+          int else_label = NextLabel();
           emit(NOLABEL, CMPLE, $1.targetRegister, $3.targetRegister, comparison);
           emit(NOLABEL, CBR, comparison, true_label, else_label);
           emit(true_label, NOP, EMPTY, EMPTY, EMPTY);
-          sprintf(CommentBuffer, "This branch is the \"true\" branch (FIX)");
-          emitComment(CommentBuffer);
           $$.label_one    = true_label;
           $$.label_two    = else_label;
-          $$.label_three  = break_label;
-
         }
 
-        | exp LEQ exp		{  }
+	| exp GT exp		{  
+          int comparison = NextRegister();
+          int true_label = NextLabel();
+          int else_label = NextLabel();
+          emit(NOLABEL, CMPGT, $1.targetRegister, $3.targetRegister, comparison);
+          emit(NOLABEL, CBR, comparison, true_label, else_label);
+          emit(true_label, NOP, EMPTY, EMPTY, EMPTY);
+          $$.label_one    = true_label;
+          $$.label_two    = else_label;
+  }
 
-	| exp GT exp		{  }
-
-	| exp GEQ exp		{  }
+	| exp GEQ exp		{
+          int comparison = NextRegister();
+          int true_label = NextLabel();
+          int else_label = NextLabel();
+          emit(NOLABEL, CMPGE, $1.targetRegister, $3.targetRegister, comparison);
+          emit(NOLABEL, CBR, comparison, true_label, else_label);
+          emit(true_label, NOP, EMPTY, EMPTY, EMPTY);
+          $$.label_one    = true_label;
+          $$.label_two    = else_label;
+  }
 
 	| error { yyerror("***Error: illegal conditional expression\n");}  
         ;

@@ -56,7 +56,7 @@ lookup(char *name) {
 
 
 void 
-insert(char *name, Type_Expression type, int offset) {
+insert(char *name, Type_Expression type, int offset, int array_size) {
   int currentIndex;
   int visitedSlots = 0;
 
@@ -77,6 +77,7 @@ insert(char *name, Type_Expression type, int offset) {
   strcpy(HashTable[currentIndex]->name, name);
   HashTable[currentIndex]->type = type; /* type expression */
   HashTable[currentIndex]->offset = offset; /* in bytes */
+  HashTable[currentIndex]->array_size = array_size; /* number of elements */
 }
 
 static
