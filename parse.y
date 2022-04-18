@@ -25,14 +25,14 @@ SymTabEntry * assignment_entry;
 %token ARRAY OF 
 %token BEG END ASG  
 %token EQ NEQ LT LEQ GT GEQ AND OR TRUE FALSE
-%token WHILE FOR ELSE 
+%token <token>WHILE FOR ELSE 
 %token <token> ID ICONST
 
 
 %type <targetReg> exp 
 %type <targetReg> lhs
 %type <type_cast> stype type
-%type <label> wstmt 
+
 %type <state_machine> ctrlexp condexp ifhead
 
 %start program
@@ -160,17 +160,17 @@ fstmt	: FOR ctrlexp DO stmt {
           ENDFOR
 	;
 
-wstmt	: WHILE {
-    $$.label_1 = NextLabel();
-    emit($$.label_1, NOP, EMPTY, EMPTY, EMPTY);
+wstmt	:  WHILE
+  {
+    $1.num = NextLabel();
+    emit($1.num, NOP, EMPTY, EMPTY, EMPTY);
     sprintf(CommentBuffer, "Control code for \"WHILE DO\"");
     emitComment(CommentBuffer);
-  } 
-  condexp DO stmt {
-    emit(NOLABEL, BR, $$.label_1, EMPTY, EMPTY);
-    emit($3.label_two, NOP, EMPTY, EMPTY, EMPTY);
   }
-  ENDWHILE 
+   condexp DO stmt 
+          ENDWHILE {     
+            emit(NOLABEL, BR, $1.num, EMPTY, EMPTY);
+            emit($3.label_two, NOP, EMPTY, EMPTY, EMPTY);}
         ;
   
 

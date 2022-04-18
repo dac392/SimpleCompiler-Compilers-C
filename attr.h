@@ -56,6 +56,7 @@ typedef struct{
 
 typedef struct{
 	int label_1;
+	int label_2;
 }label_t;
 
 #endif
