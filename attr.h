@@ -15,9 +15,7 @@ typedef enum state_type {TYPE_FOR=0, TYPE_IF=1} State_Type;
 
 typedef struct {
         Type_Expression type;
-        //Expression_Type var_type;
         int targetRegister;
-        //int constant;
 } regInfo;
 
 /* -----declarations_t----- */
@@ -35,7 +33,7 @@ void destroy(declarations_t*obj);
 /* -----state_t-----*/
 typedef struct
 {
-	State_Type type;
+	Type_Expression type;
 	int iterator;
 	int target;
 	int load_register;
@@ -43,9 +41,8 @@ typedef struct
 	int label_one;
 	int label_two;
 	int label_three;
-	/*symtab info*/
-	char* name;
 	int offset;
+	char* name;
 }state_t;
 
 typedef struct{

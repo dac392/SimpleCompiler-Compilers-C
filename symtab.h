@@ -23,6 +23,7 @@ typedef struct { /* need to augment this */
   int offset;
   Type_Expression type;
   int array_size;
+  int is_array;
 } SymTabEntry;
 
 extern
